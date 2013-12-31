@@ -49,7 +49,7 @@ type AggregateReportRecord struct {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("Date Begin, Date End, Organization, Domain, Passed, Quarantined, Rejected\n")
+	fmt.Printf("Date Begin,Date End,Organization,Domain,Passed,Quarantined,Rejected\n")
 	for _, file := range flag.Args() {
 		f, err := os.Open(file)
 		if err != nil {
@@ -81,6 +81,6 @@ func parse(r io.Reader) {
 	}
 
 	const DATEFMT = "2006-01-02 03:04:05"
-	fmt.Printf("%s, %s, %s, %s, %d, %d, %d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
+	fmt.Printf("%s,%s,%s,%s,%d,%d,%d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
 		fb.Organization, fb.Domain, dispos_none, dispos_quarantine, dispos_reject)
 }
