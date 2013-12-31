@@ -7,14 +7,17 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type AggregateReport struct {
 	Organization    string                  `xml:"report_metadata>org_name"`
 	Email           string                  `xml:"report_metadata>email"`
 	ReportID        string                  `xml:"report_metadata>report_id"`
-	DateBegin       string                  `xml:"report_metadata>date_range>begin"`
-	DateEnd         string                  `xml:"report_metadata>date_range>end"`
+	DateRangeBegin  string                  `xml:"report_metadata>date_range>begin"`
+	DateRangeEnd    string                  `xml:"report_metadata>date_range>end"`
 	Domain          string                  `xml:"policy_published>domain"`
 	AlignDKIM       string                  `xml:"policy_published>adkism"`
 	AlignSPF        string                  `xml:"policy_published>aspf"`
@@ -22,6 +25,16 @@ type AggregateReport struct {
 	SubdomainPolicy string                  `xml:"policy_published>sp"`
 	Percentage      int                     `xml:"policy_published>pct"`
 	Records         []AggregateReportRecord `xml:"record"`
+}
+
+func (r *AggregateReport) DateBegin() time.Time {
+	timestamp, _ := strconv.Atoi(strings.TrimSpace(r.DateRangeBegin))
+	return time.Unix(int64(timestamp), 0)
+}
+
+func (r *AggregateReport) DateEnd() time.Time {
+	timestamp, _ := strconv.Atoi(strings.TrimSpace(r.DateRangeEnd))
+	return time.Unix(int64(timestamp), 0)
 }
 
 type AggregateReportRecord struct {
@@ -36,6 +49,7 @@ type AggregateReportRecord struct {
 func main() {
 	flag.Parse()
 
+	fmt.Printf("Date Begin, Date End, Organization, Domain, Passed, Quarantined, Rejected\n")
 	for _, file := range flag.Args() {
 		f, err := os.Open(file)
 		if err != nil {
@@ -46,8 +60,8 @@ func main() {
 }
 
 func parse(r io.Reader) {
-	var fb AggregateReport
-	err := xml.NewDecoder(r).Decode(&fb)
+	fb := &AggregateReport{}
+	err := xml.NewDecoder(r).Decode(fb)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,5 +80,7 @@ func parse(r io.Reader) {
 		}
 	}
 
-	fmt.Printf("%s\t%s\t%s\t%s\t%d\t%d\t%d\n", fb.DateBegin, fb.DateEnd, fb.Organization, fb.Domain, dispos_none, dispos_quarantine, dispos_reject)
+	const DATEFMT = "2006-01-02 03:04:05"
+	fmt.Printf("%s, %s, %s, %s, %d, %d, %d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
+		fb.Organization, fb.Domain, dispos_none, dispos_quarantine, dispos_reject)
 }
