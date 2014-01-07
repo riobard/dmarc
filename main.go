@@ -7,8 +7,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,6 +48,13 @@ type AggregateReportRecord struct {
 	EvalSPF     string `xml:"row>policy_evaluated>spf"`
 }
 
+var wg sync.WaitGroup
+var printfLock sync.Mutex
+
+func init() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+}
+
 func main() {
 	flag.Parse()
 
@@ -55,11 +64,14 @@ func main() {
 		if err != nil {
 			log.Printf("failed to open file %s: %s", file, err)
 		}
-		parse(f)
+		wg.Add(1)
+		go parse(f)
 	}
+	wg.Wait()
 }
 
 func parse(r io.Reader) {
+	defer wg.Done()
 	fb := &AggregateReport{}
 	err := xml.NewDecoder(r).Decode(fb)
 	if err != nil {
@@ -81,6 +93,8 @@ func parse(r io.Reader) {
 	}
 
 	const DATEFMT = "2006-01-02 03:04:05"
+	printfLock.Lock()
+	defer printfLock.Unlock()
 	fmt.Printf("%s,%s,%s,%s,%d,%d,%d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
 		fb.Organization, fb.Domain, dispos_none, dispos_quarantine, dispos_reject)
 }
