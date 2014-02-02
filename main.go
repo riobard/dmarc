@@ -1,3 +1,6 @@
+/*
+A tiny command-line utility to parse DMARC aggregate reports.
+*/
 package main
 
 import (
