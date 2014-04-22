@@ -5,6 +5,7 @@ package main
 
 import (
 	"archive/zip"
+	"compress/gzip"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -64,7 +65,24 @@ func main() {
 
 	fmt.Printf("Date Begin,Date End,Organization,Domain,Passed,Quarantined,Rejected\n")
 	for _, file := range flag.Args() {
-		if strings.HasSuffix(file, ".zip") {
+		if strings.HasSuffix(file, ".gz") {
+			f, err := os.Open(file)
+			if err != nil {
+				log.Printf("failed to open file %s: %s", file, err)
+				continue
+			}
+			g, err := gzip.NewReader(f)
+			if err != nil {
+				log.Printf("failed to read gzip stream %s: %s", file, err)
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				parse(g)
+				f.Close()
+			}()
+
+		} else if strings.HasSuffix(file, ".zip") {
 			r, err := zip.OpenReader(file)
 			if err != nil {
 				log.Fatal(err)
