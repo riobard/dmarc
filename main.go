@@ -4,6 +4,7 @@ A tiny command-line utility to parse DMARC aggregate reports.
 package main
 
 import (
+	"archive/zip"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -63,12 +64,34 @@ func main() {
 
 	fmt.Printf("Date Begin,Date End,Organization,Domain,Passed,Quarantined,Rejected\n")
 	for _, file := range flag.Args() {
-		f, err := os.Open(file)
-		if err != nil {
-			log.Printf("failed to open file %s: %s", file, err)
+		if strings.HasSuffix(file, ".zip") {
+			r, err := zip.OpenReader(file)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for _, zf := range r.File {
+				// log.Printf("%s has file %s", file, zf.Name)
+				f, err := zf.Open()
+				if err != nil {
+					log.Fatal(err)
+				}
+				wg.Add(1)
+				go func() {
+					parse(f)
+					f.Close()
+				}()
+			}
+			defer r.Close()
+		} else {
+			f, err := os.Open(file)
+			if err != nil {
+				log.Printf("failed to open file %s: %s", file, err)
+				continue
+			}
+			wg.Add(1)
+			go parse(f)
 		}
-		wg.Add(1)
-		go parse(f)
 	}
 	wg.Wait()
 }
