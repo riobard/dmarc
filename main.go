@@ -114,19 +114,19 @@ func init() {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("%19s,%19s,%22s,%12s,%20s,%9s,%11s,%9s,%9s,%9s,%9s,%9s\n",
+	fmt.Printf("%19s,%19s,%22s,%12s,%20s,%7s,%7s,%7s,%7s,%7s,%7s,%7s\n",
 		"Date Begin",
 		"Date End",
 		"Organization",
 		"Domain",
 		"HeaderFrom",
 		"Passed",
-		"Quarantined",
-		"Rejected",
-		"SPF Pass",
-		"DKIM Pass",
-		"SPF Fail",
-		"DKIM Fail")
+		"Quaran",
+		"Reject",
+		"SPF P",
+		"DKIM P",
+		"SPF F",
+		"DKIM F")
 
 	for _, file := range flag.Args() {
 		if strings.HasSuffix(file, ".gz") {
@@ -196,7 +196,7 @@ func parse(r io.Reader) {
 	printfLock.Lock()
 	defer printfLock.Unlock()
 	for _, row := range report.Domains {
-		fmt.Printf("%19s,%19s,%22s,%12s,%20s,%9d,%11d,%9d,%9d,%9d,%9d,%9d\n",
+		fmt.Printf("%19s,%19s,%22s,%12s,%20s,%7d,%7d,%7d,%7d,%7d,%7d,%7d\n",
 			fb.DateBegin().UTC().Format(DATEFMT),
 			fb.DateEnd().UTC().Format(DATEFMT),
 			fb.Organization,
