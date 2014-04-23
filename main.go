@@ -47,10 +47,61 @@ func (r *AggregateReport) DateEnd() time.Time {
 type AggregateReportRecord struct {
 	SourceIP    string `xml:"row>source_ip"`
 	HeaderFrom  string `xml:"identifiers>header_from"`
-	Count       int    `xml:"row>count"`
+	Count       int64  `xml:"row>count"`
 	Disposition string `xml:"row>policy_evaluated>disposition"`
 	EvalDKIM    string `xml:"row>policy_evaluated>dkim"`
 	EvalSPF     string `xml:"row>policy_evaluated>spf"`
+}
+
+type ReportRow struct {
+	HeaderFrom       string
+	DKIMPass         int64
+	DKIMFail         int64
+	SPFPass          int64
+	SPFFail          int64
+	PolicyNone       int64
+	PolicyQuarantine int64
+	PolicyReject     int64
+}
+
+type Report struct {
+	Domains map[string]*ReportRow
+}
+
+func (r Report) Add(rec AggregateReportRecord) {
+	rr, ok := r.Domains[rec.HeaderFrom]
+	if !ok {
+		rr = &ReportRow{HeaderFrom: rec.HeaderFrom}
+		r.Domains[rec.HeaderFrom] = rr
+	}
+	switch rec.Disposition {
+	case "none":
+		rr.PolicyNone += rec.Count
+	case "quarantine":
+		rr.PolicyQuarantine += rec.Count
+	case "reject":
+		rr.PolicyReject += rec.Count
+	default:
+		log.Fatalf("unexpected disposition: %s", rec.Disposition)
+	}
+
+	switch rec.EvalDKIM {
+	case "pass":
+		rr.DKIMPass += rec.Count
+	case "fail":
+		rr.DKIMFail += rec.Count
+	default:
+		log.Fatalf("unexpected DKIM status: %s", rec.EvalDKIM)
+	}
+
+	switch rec.EvalSPF {
+	case "pass":
+		rr.SPFPass += rec.Count
+	case "fail":
+		rr.SPFFail += rec.Count
+	default:
+		log.Fatalf("unexpected SPF status: %s", rec.EvalSPF)
+	}
 }
 
 var wg sync.WaitGroup
@@ -63,7 +114,20 @@ func init() {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("Date Begin,Date End,Organization,Domain,Passed,Quarantined,Rejected\n")
+	fmt.Printf("%19s,%19s,%22s,%12s,%20s,%9s,%11s,%9s,%9s,%9s,%9s,%9s\n",
+		"Date Begin",
+		"Date End",
+		"Organization",
+		"Domain",
+		"HeaderFrom",
+		"Passed",
+		"Quarantined",
+		"Rejected",
+		"SPF Pass",
+		"DKIM Pass",
+		"SPF Fail",
+		"DKIM Fail")
+
 	for _, file := range flag.Args() {
 		if strings.HasSuffix(file, ".gz") {
 			f, err := os.Open(file)
@@ -122,23 +186,31 @@ func parse(r io.Reader) {
 		log.Fatal(err)
 	}
 
-	dispos_none, dispos_quarantine, dispos_reject := 0, 0, 0
+	report := Report{Domains: make(map[string]*ReportRow)}
+
 	for _, rec := range fb.Records {
-		switch rec.Disposition {
-		case "none":
-			dispos_none += rec.Count
-		case "quarantine":
-			dispos_quarantine += rec.Count
-		case "reject":
-			dispos_reject += rec.Count
-		default:
-			log.Fatalf("unexpected disposition: %s", rec.Disposition)
-		}
+		report.Add(rec)
 	}
 
 	const DATEFMT = "2006-01-02 03:04:05"
 	printfLock.Lock()
 	defer printfLock.Unlock()
-	fmt.Printf("%s,%s,%s,%s,%d,%d,%d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
-		fb.Organization, fb.Domain, dispos_none, dispos_quarantine, dispos_reject)
+	for _, row := range report.Domains {
+		fmt.Printf("%19s,%19s,%22s,%12s,%20s,%9d,%11d,%9d,%9d,%9d,%9d,%9d\n",
+			fb.DateBegin().UTC().Format(DATEFMT),
+			fb.DateEnd().UTC().Format(DATEFMT),
+			fb.Organization,
+			fb.Domain,
+			row.HeaderFrom,
+			row.PolicyNone,
+			row.PolicyQuarantine,
+			row.PolicyReject,
+			row.SPFPass,
+			row.DKIMPass,
+			row.SPFFail,
+			row.DKIMFail,
+		)
+
+	}
+
 }
