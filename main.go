@@ -13,10 +13,15 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+)
+
+var (
+	sortOrder = flag.String("sort", "date", "sort by date|organization|domain")
 )
 
 type AggregateReport struct {
@@ -65,10 +70,46 @@ type ReportRow struct {
 }
 
 type Report struct {
-	Domains map[string]*ReportRow
+	DateBegin    time.Time
+	DateEnd      time.Time
+	Domains      map[string]*ReportRow
+	Organization string
+	Domain       string
 }
 
-func (r Report) Add(rec AggregateReportRecord) {
+type Reports []*Report
+
+func (s Reports) Len() int      { return len(s) }
+func (s Reports) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+type ByOrganization struct{ Reports }
+
+func (s ByOrganization) Less(i, j int) bool {
+	if s.Reports[i].Organization == s.Reports[j].Organization {
+		return s.Reports[i].DateBegin.Before(s.Reports[j].DateBegin)
+	}
+	return s.Reports[i].Organization < s.Reports[j].Organization
+}
+
+type ByDomain struct{ Reports }
+
+func (s ByDomain) Less(i, j int) bool {
+	if s.Reports[i].Domain == s.Reports[j].Domain {
+		return s.Reports[i].DateBegin.Before(s.Reports[j].DateBegin)
+	}
+	return s.Reports[i].Domain < s.Reports[j].Domain
+}
+
+type ByDate struct{ Reports }
+
+func (s ByDate) Less(i, j int) bool {
+	if s.Reports[i].DateBegin.Equal(s.Reports[j].DateBegin) {
+		return s.Reports[i].Organization < s.Reports[j].Organization
+	}
+	return s.Reports[i].DateBegin.Before(s.Reports[j].DateBegin)
+}
+
+func (r *Report) Add(rec AggregateReportRecord) {
 	rr, ok := r.Domains[rec.HeaderFrom]
 	if !ok {
 		rr = &ReportRow{HeaderFrom: rec.HeaderFrom}
@@ -104,8 +145,25 @@ func (r Report) Add(rec AggregateReportRecord) {
 	}
 }
 
-var wg sync.WaitGroup
-var printfLock sync.Mutex
+func (r *Report) Format() {
+	const DATEFMT = "2006-01-02 03:04:05"
+	for _, row := range r.Domains {
+		fmt.Printf("%19s,%19s,%22s,%12s,%20s,%7d,%7d,%7d,%7d,%7d,%7d,%7d\n",
+			r.DateBegin.UTC().Format(DATEFMT),
+			r.DateEnd.UTC().Format(DATEFMT),
+			r.Organization,
+			r.Domain,
+			row.HeaderFrom,
+			row.PolicyNone,
+			row.PolicyQuarantine,
+			row.PolicyReject,
+			row.SPFPass,
+			row.DKIMPass,
+			row.SPFFail,
+			row.DKIMFail,
+		)
+	}
+}
 
 func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -128,6 +186,33 @@ func main() {
 		"SPF F",
 		"DKIM F")
 
+	out := make(chan *Report, 100)
+	exit := make(chan int)
+	var wg sync.WaitGroup
+
+	go func() {
+		var reports Reports
+		for r := range out {
+			reports = append(reports, r)
+		}
+
+		switch *sortOrder {
+		case "date":
+			sort.Sort(ByDate{reports})
+		case "domain":
+			sort.Sort(ByDomain{reports})
+		case "organization":
+			sort.Sort(ByOrganization{reports})
+		default:
+			log.Fatalf("unknown sort option %q", *sortOrder)
+		}
+
+		for _, r := range reports {
+			r.Format()
+		}
+		exit <- 1
+	}()
+
 	for _, file := range flag.Args() {
 		if strings.HasSuffix(file, ".gz") {
 			f, err := os.Open(file)
@@ -142,8 +227,9 @@ func main() {
 			}
 			wg.Add(1)
 			go func() {
-				parse(g)
+				parse(g, out)
 				f.Close()
+				wg.Done()
 			}()
 
 		} else if strings.HasSuffix(file, ".zip") {
@@ -160,8 +246,9 @@ func main() {
 				}
 				wg.Add(1)
 				go func() {
-					parse(f)
+					parse(f, out)
 					f.Close()
+					wg.Done()
 				}()
 			}
 			defer r.Close()
@@ -172,45 +259,36 @@ func main() {
 				continue
 			}
 			wg.Add(1)
-			go parse(f)
+			go func() {
+				parse(f, out)
+				f.Close()
+				wg.Done()
+			}()
 		}
 	}
 	wg.Wait()
+	close(out)
+	<-exit
+
 }
 
-func parse(r io.Reader) {
-	defer wg.Done()
+func parse(r io.Reader, response chan *Report) {
 	fb := &AggregateReport{}
 	err := xml.NewDecoder(r).Decode(fb)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	report := Report{Domains: make(map[string]*ReportRow)}
+	report := &Report{
+		Domains:      make(map[string]*ReportRow),
+		DateBegin:    fb.DateBegin(),
+		DateEnd:      fb.DateEnd(),
+		Organization: fb.Organization,
+		Domain:       fb.Domain,
+	}
 
 	for _, rec := range fb.Records {
 		report.Add(rec)
 	}
-
-	const DATEFMT = "2006-01-02 03:04:05"
-	printfLock.Lock()
-	defer printfLock.Unlock()
-	for _, row := range report.Domains {
-		fmt.Printf("%19s,%19s,%22s,%12s,%20s,%7d,%7d,%7d,%7d,%7d,%7d,%7d\n",
-			fb.DateBegin().UTC().Format(DATEFMT),
-			fb.DateEnd().UTC().Format(DATEFMT),
-			fb.Organization,
-			fb.Domain,
-			row.HeaderFrom,
-			row.PolicyNone,
-			row.PolicyQuarantine,
-			row.PolicyReject,
-			row.SPFPass,
-			row.DKIMPass,
-			row.SPFFail,
-			row.DKIMFail,
-		)
-
-	}
-
+	response <- report
 }
