@@ -17,6 +17,10 @@ import (
 	"time"
 )
 
+var (
+	DATEFMT = "2006-01-02 03:04:05"
+)
+
 type AggregateReport struct {
 	Organization    string                  `xml:"report_metadata>org_name"`
 	Email           string                  `xml:"report_metadata>email"`
@@ -59,7 +63,11 @@ func init() {
 }
 
 func main() {
+	var H = flag.Bool("H", false, "Set 24-hour time format")
 	flag.Parse()
+	if *H {
+		DATEFMT = "2006-01-02 15:04:05"
+	}
 
 	fmt.Printf("Date Begin,Date End,Organization,Domain,Passed,Quarantined,Rejected\n")
 	for _, file := range flag.Args() {
@@ -95,7 +103,6 @@ func parse(r io.Reader) {
 		}
 	}
 
-	const DATEFMT = "2006-01-02 03:04:05"
 	printfLock.Lock()
 	defer printfLock.Unlock()
 	fmt.Printf("%s,%s,%s,%s,%d,%d,%d\n", fb.DateBegin().UTC().Format(DATEFMT), fb.DateEnd().UTC().Format(DATEFMT),
